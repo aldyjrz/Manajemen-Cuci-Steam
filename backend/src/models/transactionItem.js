@@ -26,6 +26,8 @@ module.exports = (sequelize, DataTypes) => {
   }, {
     tableName: 'transaction_items',
     timestamps: true,
+    createdAt: 'created_at',
+    updatedAt: false,
     underscored: true,
   });
 

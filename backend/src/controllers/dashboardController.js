@@ -25,7 +25,7 @@ const getDashboard = async (req, res) => {
     const userActive = await User.count({ where: { aktif: true } });
 
     const vehicleCounts = await Transaction.findAll({
-      attributes: ['jenis_kendaraan_id', [Transaction.sequelize.fn('COUNT', Transaction.sequelize.col('id')), 'count']],
+      attributes: ['jenis_kendaraan_id', [Transaction.sequelize.fn('COUNT', Transaction.sequelize.col('Transaction.id')), 'count']],
       group: ['jenis_kendaraan_id'],
       include: [{ model: VehicleType, attributes: ['nama'] }],
     });
