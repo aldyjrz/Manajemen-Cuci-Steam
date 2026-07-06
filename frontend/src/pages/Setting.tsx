@@ -1,7 +1,11 @@
 import { useEffect, useState } from "react";
 import { get, put } from "../services/api";
+import { getCurrentUser } from "../services/auth";
 
 export default function Setting() {
+  const currentUser = getCurrentUser();
+  const isAdmin = currentUser?.role === "Admin";
+
   const [settings, setSettings] = useState({
     nama_steam: "",
     alamat: "",
@@ -18,9 +22,7 @@ export default function Setting() {
       setErrorMessage(null);
       try {
         const response = await get<{ nama_steam: string; alamat: string; no_hp: string; footer: string }>("settings");
-        if (response.data) {
-          setSettings(response.data);
-        }
+        setSettings(response.data || { nama_steam: "", alamat: "", no_hp: "", footer: "" });
       } catch (error) {
         setErrorMessage(error instanceof Error ? error.message : "Gagal memuat setelan.");
       } finally {
@@ -39,6 +41,12 @@ export default function Setting() {
     event.preventDefault();
     setStatusMessage(null);
     setErrorMessage(null);
+
+    if (!isAdmin) {
+      setErrorMessage("Hanya admin yang dapat menyimpan setelan.");
+      return;
+    }
+
     setLoading(true);
 
     try {
@@ -64,6 +72,11 @@ export default function Setting() {
 
         {statusMessage && <div className="mt-4 rounded-xl bg-emerald-50 p-3 text-sm text-emerald-700">{statusMessage}</div>}
         {errorMessage && <div className="mt-4 rounded-xl bg-rose-50 p-3 text-sm text-rose-700">{errorMessage}</div>}
+        {!isAdmin && (
+          <div className="mt-4 rounded-xl bg-slate-50 p-3 text-sm text-slate-600">
+            Hanya admin yang dapat menyimpan perubahan setelan.
+          </div>
+        )}
 
         <form onSubmit={handleSave} className="mt-6 grid gap-5 sm:grid-cols-2">
           <div>
@@ -103,7 +116,8 @@ export default function Setting() {
           <div className="sm:col-span-2">
             <button
               type="submit"
-              className="inline-flex items-center justify-center rounded-xl bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-500"
+              disabled={!isAdmin}
+              className="inline-flex items-center justify-center rounded-xl bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-500 disabled:cursor-not-allowed disabled:bg-slate-400"
             >
               Simpan Setelan
             </button>

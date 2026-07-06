@@ -1,113 +1,132 @@
+import { useEffect, useState } from "react";
 import DataTable from "../components/DataTable";
-import { CalendarDaysIcon } from "@heroicons/react/24/outline";
 import DatePicker from "../components/DatePicker";
-import { useState } from "react";
- export default function History() {
-    const [startDate, setStartDate] = useState("");
+import { get } from "../services/api";
+
+type AttendanceHistoryItem = {
+  id: number;
+  tanggal: string;
+  jam_masuk?: string;
+  jam_pulang?: string;
+  status?: string;
+  User?: { nama: string };
+};
+
+const columns = [
+  { key: "tanggal", label: "Tanggal" },
+  { key: "user", label: "Karyawan" },
+  { key: "status", label: "Status" },
+  { key: "jam_masuk", label: "Jam Masuk" },
+  { key: "jam_pulang", label: "Jam Pulang" },
+];
+
+export default function History() {
+  const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
-   const [statusMessage, setStatusMessage] = useState<string | null>(null);
+  const [data, setData] = useState<AttendanceHistoryItem[]>([]);
+  const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-   const [loading, setLoading] = useState<string | null>(null);     
-  const columns = [
-    {
-      key: "tanggal",
-      label: "Tanggal",
-    },
-    {
-      key: "jamMasuk",
-      label: "Jam Masuk",
-    },
-    {
-      key: "status",
-      label: "Status",
-    },
-  ];
+  const [loading, setLoading] = useState(false);
 
-  const data = [
-    {
-      tanggal: "17-06-2026",
-      jamMasuk: "08:00",
-      status: "Hadir",
-    },
-  ];
-  
-
-  
-  const handleFilter = async () => {
-    setLoading("Filtering...");
+  const fetchHistory = async (from?: string, to?: string) => {
+    setLoading(true);
+    setErrorMessage(null);
     setStatusMessage(null);
 
-    if (!data) {
-      setErrorMessage("No data available.");
-      return;
-    } 
-  
-    setLoading("Filter");
-  
     try {
-      const formData = new FormData();
-      formData.append("date-start", startDate);
-      formData.append("date-end", endDate);
-      
-      const response = await fetch("/api/history/get-data", {
-        method: "POST",
-        body: formData,
-      });
-
-      if (!response.ok) {
-        throw new Error("Failed to filter data.");
-      }
-
-      setStatusMessage("Data successfully filtered.");
-     
+      const query = new URLSearchParams();
+      if (from) query.append("tanggal_mulai", from);
+      if (to) query.append("tanggal_selesai", to);
+      const path = query.toString() ? `attendance/report?${query.toString()}` : "attendance/report";
+      const response = await get<{ attendances: AttendanceHistoryItem[] }>(path);
+      setData(response.data?.attendances || []);
+      setStatusMessage(from || to ? "Filter berhasil diterapkan." : "Riwayat absensi dimuat.");
     } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : "An error occurred while filtering.");
-      console.error(error);
+      setErrorMessage(error instanceof Error ? error.message : "Gagal memuat riwayat absensi.");
+      setData([]);
     } finally {
-      setLoading(null);
+      setLoading(false);
     }
   };
 
+  useEffect(() => {
+    fetchHistory();
+  }, []);
+
+  const handleFilter = async () => {
+    setStatusMessage(null);
+    setErrorMessage(null);
+
+    if (!startDate && !endDate) {
+      setErrorMessage("Pilih tanggal mulai atau tanggal selesai untuk filter.");
+      return;
+    }
+
+    await fetchHistory(startDate, endDate);
+  };
+
+  const tableRows = data.map((item) => ({
+    tanggal: item.tanggal,
+    user: item.User?.nama || "-",
+    status: item.status || "-",
+    jam_masuk: item.jam_masuk ? new Date(item.jam_masuk).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" }) : "-",
+    jam_pulang: item.jam_pulang ? new Date(item.jam_pulang).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" }) : "-",
+  }));
+
+  
   return (
-            <div>
-        {statusMessage && <div className="rounded-xl bg-emerald-50 p-3 text-sm text-emerald-700">{statusMessage}</div>}
-        {errorMessage && <div className="rounded-xl bg-rose-50 p-3 text-sm text-rose-700">{errorMessage}</div>}
+    <div className="p-6 space-y-6">
+      <div className="rounded-2xl bg-white p-6 shadow-sm">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h2 className="text-2xl font-semibold">Riwayat Absensi</h2>
+            <p className="text-sm text-slate-500">Filter dan lihat riwayat absensi karyawan.</p>
+          </div>
+          {loading && <span className="text-sm text-slate-500">Memuat...</span>}
+        </div>
 
-              <label htmlFor="email" className="flex text-sm/6 font-medium text-black-500">
-                Filter by date
-              </label>
-        <div className="flex gap-2 items-end">
-  <div className="relative">
-    <DatePicker
-        value={startDate}
-        onChange={(e) => setStartDate(e.target.value)}
-      />
+        {statusMessage && <div className="mt-4 rounded-xl bg-emerald-50 p-3 text-sm text-emerald-700">{statusMessage}</div>}
+        {errorMessage && <div className="mt-4 rounded-xl bg-rose-50 p-3 text-sm text-rose-700">{errorMessage}</div>}
 
-  </div>
+        <div className="mt-6 grid gap-4 sm:grid-cols-[1fr_1fr_auto]">
+          <div>
+            <label className="block text-sm font-medium">Tanggal Mulai</label>
+            <DatePicker value={startDate} onChange={(e) => setStartDate(e.target.value)} />
+          </div>
+          <div>
+            <label className="block text-sm font-medium">Tanggal Selesai</label>
+            <DatePicker value={endDate} onChange={(e) => setEndDate(e.target.value)} />
+          </div>
+          <div className="flex items-end">
+            <button
+              type="button"
+              onClick={handleFilter}
+              className="inline-flex items-center justify-center rounded-xl bg-orange-500 px-4 py-2 text-white hover:bg-orange-600"
+            >
+              Filter
+            </button>
+          </div>
+        </div>
+      </div>
 
-  <div className="relative">
-   
-      <DatePicker
-        value={endDate}
-        onChange={(e) => setEndDate(e.target.value)}
-      />
-  </div>
-
-  <button
-     onClick={handleFilter}
-    disabled={loading}
-    type="submit"
-    className="flex items-center gap-2 rounded-md bg-orange-500 px-4 py-2 text-white hover:bg-orange-600"
-  >
-    Filter
-  </button>
-</div>
-            
-
-    <DataTable
-      columns={columns}
-      data={data}
-    />
+      <div className="rounded-2xl bg-white p-6 shadow-sm">
+        <h3 className="text-lg font-semibold">Hasil Riwayat Absensi</h3>
+        <div className="mt-4 overflow-x-auto">
+          {data.length === 0 && !loading ? (
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-6 text-center text-sm text-slate-500">
+              Tidak ada data absensi.
+            </div>
+          ) : (
+            <DataTable columns={columns} data={data.map((item) => ({
+              tanggal: item.tanggal,
+              user: item.User?.nama || "-",
+              status: item.status || "-",
+              jam_masuk: item.jam_masuk ? new Date(item.jam_masuk).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" }) : "-",
+              jam_pulang: item.jam_pulang ? new Date(item.jam_pulang).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" }) : "-",
+            }))} />
+          )}
+        </div>
+      </div>
     </div>
   );
 }

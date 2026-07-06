@@ -23,6 +23,11 @@ export default function Sidebar({ isOpen }: SidebarProps) {
       icon: "💳",
     },
     {
+      name: "Master Produk",
+      path: "/products",
+      icon: "🛒",
+    },
+    {
       name: "Attendance",
       path: "/attendance",
       icon: "📍",

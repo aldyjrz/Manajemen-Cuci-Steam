@@ -6,6 +6,7 @@ import Attendance from '../pages/Attendance';
 import History from '../pages/History';
 import Karyawan from '../pages/Karyawan';
 import Kasir from '../pages/Kasir';
+import Products from '../pages/Products';
 import Setting from '../pages/Setting';
 import AppLayout from '../components/AppLayout';
 import TitleManager from '../components/TitleManager';
@@ -24,6 +25,7 @@ export default function AppRoutes() {
             <Route path="/history" element={<History />} />
             <Route path="/karyawan" element={<Karyawan />} />
             <Route path="/kasir" element={<Kasir />} />
+            <Route path="/products" element={<Products />} />
             <Route path="/setting" element={<Setting />} />
           </Route>
         </Route>

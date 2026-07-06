@@ -21,12 +21,26 @@ export default function Dashboard() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   useEffect(() => {
+    const initialDashboard = {
+      totalTransactions: 0,
+      totalRevenue: 0,
+      userActive: 0,
+      userAbsen: 0,
+      vehicleCounts: [],
+      statusCounts: [],
+    };
+
     const fetchData = async () => {
       try {
         const response = await get<typeof dashboard>("dashboard");
-        setDashboard(response.data);
+        setDashboard(response.data || initialDashboard);
       } catch (error) {
-        setErrorMessage(error instanceof Error ? error.message : "Gagal memuat dashboard.");
+        const status = (error as any)?.status;
+        if (status === 403) {
+          setErrorMessage("Akses dashboard ditolak. Hanya Admin atau Kasir dapat melihat data ini.");
+        } else {
+          setErrorMessage(error instanceof Error ? error.message : "Gagal memuat dashboard.");
+        }
       } finally {
         setLoading(false);
       }
