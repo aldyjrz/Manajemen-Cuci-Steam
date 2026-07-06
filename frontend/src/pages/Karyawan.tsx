@@ -56,13 +56,26 @@ export default function Karyawan() {
     setStatusMessage(null);
 
     try {
+      const payload: Record<string, any> = {
+        nama: form.nama,
+        username: form.username,
+        role: form.role,
+        no_hp: form.no_hp,
+        alamat: form.alamat,
+      };
+
+      if (form.password) {
+        payload.password = form.password;
+      }
+
       if (selectedUser) {
-        await put(`users/${selectedUser.id}`, form);
+        await put(`users/${selectedUser.id}`, payload);
         setStatusMessage("Data karyawan berhasil diperbarui.");
       } else {
-        await post("users", form);
+        await post("users", payload);
         setStatusMessage("Pengguna berhasil dibuat.");
       }
+
       setForm({ nama: "", username: "", password: "", role: "Karyawan", no_hp: "", alamat: "" });
       setSelectedUser(null);
       setIsModalOpen(false);
@@ -132,6 +145,14 @@ export default function Karyawan() {
                 ...user,
                 aktif: user.aktif ? "Ya" : "Tidak",
                 actions: (
+                  <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => handleEdit(user)}
+                    className="rounded-md bg-indigo-600 px-3 py-1 text-xs font-semibold text-white hover:bg-indigo-700"
+                  >
+                    Edit
+                  </button>
                   <button
                     type="button"
                     onClick={() => handleDelete(user.id)}
@@ -139,6 +160,7 @@ export default function Karyawan() {
                   >
                     Hapus
                   </button>
+                </div>
                 ),
               }))}
             />
@@ -150,8 +172,8 @@ export default function Karyawan() {
             <div className="w-full max-w-2xl rounded-3xl bg-white p-6 shadow-2xl">
               <div className="flex items-center justify-between">
                 <div>
-                  <h3 className="text-xl font-semibold">Tambah Karyawan</h3>
-                  <p className="text-sm text-slate-500">Masukkan data pegawai baru di sini.</p>
+                  <h3 className="text-xl font-semibold">{selectedUser ? "Edit Karyawan" : "Tambah Karyawan"}</h3>
+                  <p className="text-sm text-slate-500">{selectedUser ? "Perbarui data karyawan." : "Masukkan data pegawai baru di sini."}</p>
                 </div>
                 <button
                   type="button"
