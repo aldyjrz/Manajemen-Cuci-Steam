@@ -4,12 +4,17 @@ import { get, post } from "../services/api";
 type Transaction = {
   id: number;
   nomor_plat?: string;
-  nama_pelanggan?: string;
-  no_hp?: string;
   total?: number;
   status?: string;
   created_at?: string;
   tanggal?: string;
+};
+
+type Product = {
+  id: number;
+  nama_produk: string;
+  harga: number;
+  aktif: boolean;
 };
 
 type VehicleType = {
@@ -23,17 +28,16 @@ const defaultTransactions: Transaction[] = [
 
 const initialForm = {
   nomor_plat: "",
-  nama_pelanggan: "",
-  no_hp: "",
   jenis_kendaraan_id: "",
+  product_id: "",
+  quantity: "1",
   metode_bayar: "Cash",
-  total: "",
-  diskon: "0",
   catatan: "",
 };
 
 export default function Kasir() {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const [products, setProducts] = useState<Product[]>([]);
   const [vehicleTypes, setVehicleTypes] = useState<VehicleType[]>([]);
   const [form, setForm] = useState(initialForm);
   const [loading, setLoading] = useState(true);
@@ -51,6 +55,15 @@ export default function Kasir() {
     }
   };
 
+  const fetchProducts = async () => {
+    try {
+      const response = await get<Product[]>("products");
+      setProducts(response.data || []);
+    } catch (error) {
+      console.error(error);
+    }
+  };
+
   const fetchVehicleTypes = async () => {
     try {
       const response = await get<VehicleType[]>("vehicle-types");
@@ -65,7 +78,7 @@ export default function Kasir() {
       setLoading(true);
       setErrorMessage(null);
       try {
-        await Promise.all([fetchTransactions(), fetchVehicleTypes()]);
+        await Promise.all([fetchTransactions(), fetchProducts(), fetchVehicleTypes()]);
       } finally {
         setLoading(false);
       }
@@ -78,13 +91,27 @@ export default function Kasir() {
     setForm((prev) => ({ ...prev, [key]: value }));
   };
 
+  const selectedProduct = products.find((product) => product.id === Number(form.product_id));
+  const quantity = Number(form.quantity) || 1;
+  const totalAmount = selectedProduct ? selectedProduct.harga * quantity : 0;
+
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
     setErrorMessage(null);
     setSuccessMessage(null);
 
-    if (!form.nomor_plat.trim() || !form.jenis_kendaraan_id.trim() || !form.total.trim()) {
-      setErrorMessage("Nomor plat, jenis kendaraan, dan total wajib diisi.");
+    if (!form.nomor_plat.trim()) {
+      setErrorMessage("Nomor plat wajib diisi.");
+      return;
+    }
+
+    if (!form.jenis_kendaraan_id.trim()) {
+      setErrorMessage("Jenis kendaraan wajib dipilih.");
+      return;
+    }
+
+    if (!selectedProduct) {
+      setErrorMessage("Pilih produk yang tersedia.");
       return;
     }
 
@@ -93,13 +120,17 @@ export default function Kasir() {
     try {
       await post("transactions", {
         nomor_plat: form.nomor_plat,
-        nama_pelanggan: form.nama_pelanggan,
-        no_hp: form.no_hp,
         jenis_kendaraan_id: Number(form.jenis_kendaraan_id),
-        total: Number(form.total) || 0,
-        diskon: Number(form.diskon) || 0,
+        total: totalAmount,
         metode_bayar: form.metode_bayar,
-        catatan: form.catatan,
+        catatan: form.catatan || "",
+        items: [
+          {
+            product_id: selectedProduct.id,
+            harga: selectedProduct.harga,
+            quantity,
+          },
+        ],
       });
 
       setSuccessMessage("Transaksi berhasil disimpan.");
@@ -126,7 +157,7 @@ export default function Kasir() {
         {successMessage && <div className="mt-4 rounded-xl bg-emerald-50 p-3 text-sm text-emerald-700">{successMessage}</div>}
         {errorMessage && <div className="mt-4 rounded-xl bg-rose-50 p-3 text-sm text-rose-700">{errorMessage}</div>}
 
-        <form onSubmit={handleSubmit} className="mt-6 grid gap-4 xl:grid-cols-[1fr_1fr]">
+        <form onSubmit={handleSubmit} className="mt-6 grid gap-4 grid-cols-1 sm:grid-cols-2 xl:grid-cols-4">
           <div>
             <label className="block text-sm font-medium">Nomor Plat</label>
             <input
@@ -151,45 +182,40 @@ export default function Kasir() {
             </select>
           </div>
           <div>
-            <label className="block text-sm font-medium">Nama Pelanggan</label>
-            <input
-              value={form.nama_pelanggan}
-              onChange={(e) => handleChange("nama_pelanggan", e.target.value)}
+            <label className="block text-sm font-medium">Produk</label>
+            <select
+              value={form.product_id}
+              onChange={(e) => handleChange("product_id", e.target.value)}
               className="mt-2 block w-full rounded-md border px-3 py-2"
-            />
+              required
+            >
+              <option value="">Pilih produk</option>
+              {products.filter((product) => product.aktif).map((product) => (
+                <option key={product.id} value={product.id}>{product.nama_produk} - Rp {Number(product.harga).toLocaleString("id-ID")}</option>
+              ))}
+            </select>
           </div>
           <div>
-            <label className="block text-sm font-medium">No HP</label>
-            <input
-              value={form.no_hp}
-              onChange={(e) => handleChange("no_hp", e.target.value)}
-              className="mt-2 block w-full rounded-md border px-3 py-2"
-            />
-          </div>
-          <div>
-            <label className="block text-sm font-medium">Total</label>
+            <label className="block text-sm font-medium">Jumlah</label>
             <input
               type="number"
-              min="0"
-              step="0.01"
-              value={form.total}
-              onChange={(e) => handleChange("total", e.target.value)}
+              min="1"
+              value={form.quantity}
+              onChange={(e) => handleChange("quantity", e.target.value)}
               className="mt-2 block w-full rounded-md border px-3 py-2"
               required
             />
           </div>
           <div>
-            <label className="block text-sm font-medium">Diskon</label>
+            <label className="block text-sm font-medium">Total</label>
             <input
-              type="number"
-              min="0"
-              step="0.01"
-              value={form.diskon}
-              onChange={(e) => handleChange("diskon", e.target.value)}
-              className="mt-2 block w-full rounded-md border px-3 py-2"
+              type="text"
+              value={`Rp ${totalAmount.toLocaleString("id-ID")}`}
+              readOnly
+              className="mt-2 block w-full rounded-md border bg-slate-50 px-3 py-2 text-slate-700"
             />
           </div>
-          <div className="xl:col-span-2">
+          <div>
             <label className="block text-sm font-medium">Metode Bayar</label>
             <select
               value={form.metode_bayar}
@@ -201,7 +227,7 @@ export default function Kasir() {
               <option value="E-Wallet">E-Wallet</option>
             </select>
           </div>
-          <div className="xl:col-span-2">
+          <div className="col-span-1 sm:col-span-2 xl:col-span-4">
             <label className="block text-sm font-medium">Catatan</label>
             <textarea
               value={form.catatan}
@@ -210,7 +236,7 @@ export default function Kasir() {
               rows={3}
             />
           </div>
-          <div className="xl:col-span-2 flex justify-end">
+          <div className="col-span-1 sm:col-span-2 xl:col-span-4 flex justify-end">
             <button
               type="submit"
               disabled={submitting}
