@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { get, post } from "../services/api";
+import { get, post, put } from "../services/api";
 
 type Transaction = {
   id: number;
@@ -8,6 +8,7 @@ type Transaction = {
   status?: string;
   created_at?: string;
   tanggal?: string;
+  Assignments?: any[];
 };
 
 type Product = {
@@ -33,12 +34,14 @@ const initialForm = {
   quantity: "1",
   metode_bayar: "Cash",
   catatan: "",
+  assign_user_id: "",
 };
 
 export default function Kasir() {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
   const [vehicleTypes, setVehicleTypes] = useState<VehicleType[]>([]);
+  const [karyawans, setKaryawans] = useState<{ id: number; nama: string }[]>([]);
   const [form, setForm] = useState(initialForm);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
@@ -73,12 +76,23 @@ export default function Kasir() {
     }
   };
 
+  const fetchKaryawansToday = async () => {
+    try {
+      const today = new Date().toISOString().slice(0, 10);
+      const response = await get<any[]>(`attendance?tanggal=${today}`);
+      const list = (response.data || []).map((a: any) => ({ id: a.User?.id || a.user_id, nama: a.User?.nama || a.User?.username || '' }));
+      setKaryawans(list);
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
   useEffect(() => {
     const loadData = async () => {
       setLoading(true);
       setErrorMessage(null);
       try {
-        await Promise.all([fetchTransactions(), fetchProducts(), fetchVehicleTypes()]);
+        await Promise.all([fetchTransactions(), fetchProducts(), fetchVehicleTypes(), fetchKaryawansToday()]);
       } finally {
         setLoading(false);
       }
@@ -118,7 +132,7 @@ export default function Kasir() {
     setSubmitting(true);
 
     try {
-      await post("transactions", {
+      const created = await post("transactions", {
         nomor_plat: form.nomor_plat,
         jenis_kendaraan_id: Number(form.jenis_kendaraan_id),
         total: totalAmount,
@@ -133,13 +147,35 @@ export default function Kasir() {
         ],
       });
 
+      const transaksiId = created.data?.id;
+
+      if (form.assign_user_id && transaksiId) {
+        try {
+          await post('transactions/assign', { transaksi_id: transaksiId, user_id: Number(form.assign_user_id) });
+        } catch (err) {
+          console.error('Failed to assign user', err);
+        }
+      }
+
       setSuccessMessage("Transaksi berhasil disimpan.");
       setForm(initialForm);
-      await fetchTransactions();
+      await Promise.all([fetchTransactions(), fetchKaryawansToday()]);
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "Gagal menyimpan transaksi.");
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  const handleFinish = async (assignmentId?: number) => {
+    if (!assignmentId) return;
+    try {
+      await put(`transactions/assign/${assignmentId}`, { status: 'finished', finished_at: new Date() });
+      await fetchTransactions();
+      setSuccessMessage('Status transaksi diubah menjadi Finished.');
+    } catch (err) {
+      console.error(err);
+      setErrorMessage('Gagal mengubah status.');
     }
   };
 
@@ -195,17 +231,7 @@ export default function Kasir() {
               ))}
             </select>
           </div>
-          <div>
-            <label className="block text-sm font-medium">Jumlah</label>
-            <input
-              type="number"
-              min="1"
-              value={form.quantity}
-              onChange={(e) => handleChange("quantity", e.target.value)}
-              className="mt-2 block w-full rounded-md border px-3 py-2"
-              required
-            />
-          </div>
+        
           <div>
             <label className="block text-sm font-medium">Total</label>
             <input
@@ -227,6 +253,21 @@ export default function Kasir() {
               <option value="E-Wallet">E-Wallet</option>
             </select>
           </div>
+
+          <div>
+            <label className="block text-sm font-medium">Assign Karyawan (opsional)</label>
+            <select
+              value={(form as any).assign_user_id}
+              onChange={(e) => handleChange('assign_user_id', e.target.value)}
+              className="mt-2 block w-full rounded-md border px-3 py-2"
+            >
+              <option value="">Pilih karyawan</option>
+              {karyawans.map((k) => (
+                <option key={k.id} value={k.id}>{k.nama}</option>
+              ))}
+            </select>
+          </div>
+
           <div className="col-span-1 sm:col-span-2 xl:col-span-4">
             <label className="block text-sm font-medium">Catatan</label>
             <textarea
@@ -234,6 +275,16 @@ export default function Kasir() {
               onChange={(e) => handleChange("catatan", e.target.value)}
               className="mt-2 block w-full rounded-md border px-3 py-2"
               rows={3}
+            />
+          </div>
+            <div>
+            <input
+              type="number"
+              min="1"
+              value="1"
+              onChange={(e) => handleChange("quantity", e.target.value)}
+              className="hidden mt-2 block w-full rounded-md border px-3 py-2"
+              required
             />
           </div>
           <div className="col-span-1 sm:col-span-2 xl:col-span-4 flex justify-end">
@@ -264,26 +315,38 @@ export default function Kasir() {
                 <th className="px-4 py-3 font-semibold text-slate-700">Tanggal</th>
                 <th className="px-4 py-3 font-semibold text-slate-700">Total</th>
                 <th className="px-4 py-3 font-semibold text-slate-700">Status</th>
+                <th className="px-4 py-3 font-semibold text-slate-700">Karyawan</th>
+                <th className="px-4 py-3 font-semibold text-slate-700">Aksi</th>
               </tr>
             </thead>
             <tbody>
               {!transactions.length ? (
                 <tr>
-                  <td colSpan={4} className="px-4 py-6 text-center text-sm text-slate-500">
+                  <td colSpan={6} className="px-4 py-6 text-center text-sm text-slate-500">
                     Tidak ada transaksi.
                   </td>
                 </tr>
               ) : (
-                transactions.map((transaction, index) => (
-                  <tr key={transaction.id || index} className="border-t border-slate-200">
-                    <td className="px-4 py-3">{index + 1}</td>
-                    <td className="px-4 py-3">
-                      {new Date(transaction.tanggal || transaction.created_at || Date.now()).toLocaleDateString("id-ID")}
-                    </td>
-                    <td className="px-4 py-3">Rp {Number(transaction.total || 0).toLocaleString("id-ID")}</td>
-                    <td className="px-4 py-3">{transaction.status || "-"}</td>
-                  </tr>
-                ))
+                transactions.map((transaction, index) => {
+                  const assignment = transaction.Assignments && transaction.Assignments.length ? transaction.Assignments[0] : null;
+                  const assigneeName = assignment?.User?.nama || assignment?.User?.username || '';
+                  return (
+                    <tr key={transaction.id || index} className="border-t border-slate-200">
+                      <td className="px-4 py-3">{index + 1}</td>
+                      <td className="px-4 py-3">
+                        {new Date(transaction.tanggal || transaction.created_at || Date.now()).toLocaleDateString("id-ID")}
+                      </td>
+                      <td className="px-4 py-3">Rp {Number(transaction.total || 0).toLocaleString("id-ID")}</td>
+                      <td className="px-4 py-3">{transaction.status || "-"}</td>
+                      <td className="px-4 py-3">{assigneeName || '-'}</td>
+                      <td className="px-4 py-3">
+                        {assignment && transaction.status !== 'Finished' ? (
+                          <button onClick={() => handleFinish(assignment.id)} className="rounded-md bg-emerald-600 px-3 py-1 text-white text-sm">Selesai</button>
+                        ) : null}
+                      </td>
+                    </tr>
+                  );
+                })
               )}
             </tbody>
           </table>
