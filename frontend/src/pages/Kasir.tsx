@@ -1,18 +1,6 @@
 import { useEffect, useState } from "react";
 import { get, post, put } from "../services/api";
 
-type Assignment = {
-  id: number;
-  transaksi_id?: number;
-  user_id?: number;
-  started_at?: string | null;
-  finished_at?: string | null;
-  User?: {
-    id: number;
-    nama: string;
-  };
-};
-
 type Transaction = {
   id: number;
   nomor_plat?: string;
@@ -20,8 +8,7 @@ type Transaction = {
   status?: string;
   created_at?: string;
   tanggal?: string;
-  Assignments?: Assignment[];
-  assignments?: Assignment[];
+  Assignments?: any[];
 };
 
 type Product = {
@@ -36,14 +23,6 @@ type VehicleType = {
   nama: string;
 };
 
-type User = {
-  id: number;
-  nama: string;
-  username?: string;
-  role: "Admin" | "Kasir" | "Karyawan";
-  aktif: boolean;
-};
-
 const defaultTransactions: Transaction[] = [
   { id: 0, tanggal: "-", total: 0, status: "-" },
 ];
@@ -55,19 +34,17 @@ const initialForm = {
   quantity: "1",
   metode_bayar: "Cash",
   catatan: "",
+  assign_user_id: "",
 };
 
 export default function Kasir() {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
   const [vehicleTypes, setVehicleTypes] = useState<VehicleType[]>([]);
-  const [users, setUsers] = useState<User[]>([]);
+  const [karyawans, setKaryawans] = useState<{ id: number; nama: string }[]>([]);
   const [form, setForm] = useState(initialForm);
-  const [assignUserByTransaction, setAssignUserByTransaction] = useState<Record<number, string>>({});
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
-  const [assigningId, setAssigningId] = useState<number | null>(null);
-  const [updatingAssignmentId, setUpdatingAssignmentId] = useState<number | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
@@ -99,13 +76,14 @@ export default function Kasir() {
     }
   };
 
-  const fetchUsers = async () => {
+  const fetchKaryawansToday = async () => {
     try {
-      const response = await get<User[]>("users");
-      setUsers((response.data || []).filter((user) => user.role === "Karyawan" && user.aktif));
-    } catch (error) {
-      console.error(error);
-      setUsers([]);
+      const today = new Date().toISOString().slice(0, 10);
+      const response = await get<any[]>(`attendance?tanggal=${today}`);
+      const list = (response.data || []).map((a: any) => ({ id: a.User?.id || a.user_id, nama: a.User?.nama || a.User?.username || '' }));
+      setKaryawans(list);
+    } catch (err) {
+      console.error(err);
     }
   };
 
@@ -114,7 +92,7 @@ export default function Kasir() {
       setLoading(true);
       setErrorMessage(null);
       try {
-        await Promise.all([fetchTransactions(), fetchProducts(), fetchVehicleTypes(), fetchUsers()]);
+        await Promise.all([fetchTransactions(), fetchProducts(), fetchVehicleTypes(), fetchKaryawansToday()]);
       } finally {
         setLoading(false);
       }
@@ -130,9 +108,6 @@ export default function Kasir() {
   const selectedProduct = products.find((product) => product.id === Number(form.product_id));
   const quantity = Number(form.quantity) || 1;
   const totalAmount = selectedProduct ? selectedProduct.harga * quantity : 0;
-
-  const getAssignments = (transaction: Transaction) => transaction.Assignments || transaction.assignments || [];
-  const getFirstAssignment = (transaction: Transaction) => getAssignments(transaction)[0];
 
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -157,7 +132,7 @@ export default function Kasir() {
     setSubmitting(true);
 
     try {
-      await post("transactions", {
+      const created = await post("transactions", {
         nomor_plat: form.nomor_plat,
         jenis_kendaraan_id: Number(form.jenis_kendaraan_id),
         total: totalAmount,
@@ -172,9 +147,19 @@ export default function Kasir() {
         ],
       });
 
+      const transaksiId = created.data?.id;
+
+      if (form.assign_user_id && transaksiId) {
+        try {
+          await post('transactions/assign', { transaksi_id: transaksiId, user_id: Number(form.assign_user_id) });
+        } catch (err) {
+          console.error('Failed to assign user', err);
+        }
+      }
+
       setSuccessMessage("Transaksi berhasil disimpan.");
       setForm(initialForm);
-      await fetchTransactions();
+      await Promise.all([fetchTransactions(), fetchKaryawansToday()]);
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "Gagal menyimpan transaksi.");
     } finally {
@@ -182,76 +167,15 @@ export default function Kasir() {
     }
   };
 
-  const handleAssignUser = async (transactionId: number) => {
-    const userId = assignUserByTransaction[transactionId];
-
-    setErrorMessage(null);
-    setSuccessMessage(null);
-
-    if (!userId) {
-      setErrorMessage("Pilih karyawan terlebih dahulu.");
-      return;
-    }
-
-    setAssigningId(transactionId);
-
+  const handleFinish = async (assignmentId?: number) => {
+    if (!assignmentId) return;
     try {
-      await post("transactions/assign", {
-        transaksi_id: transactionId,
-        user_id: Number(userId),
-      });
-
-      setSuccessMessage("Karyawan berhasil di-assign. Status transaksi menjadi Assigned.");
-      setAssignUserByTransaction((prev) => ({ ...prev, [transactionId]: "" }));
+      await put(`transactions/assign/${assignmentId}`, { status: 'finished', finished_at: new Date() });
       await fetchTransactions();
-    } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : "Gagal assign karyawan.");
-    } finally {
-      setAssigningId(null);
-    }
-  };
-
-  const handleUpdateAssignmentStatus = async (assignmentId: number, status: "started" | "finished" | "cancel") => {
-    setErrorMessage(null);
-    setSuccessMessage(null);
-    setUpdatingAssignmentId(assignmentId);
-
-    const payload =
-      status === "started"
-        ? { status, started_at: new Date().toISOString() }
-        : status === "finished"
-          ? { status, finished_at: new Date().toISOString() }
-          : { status };
-
-    try {
-      await put(`transactions/assign/${assignmentId}`, payload);
-      setSuccessMessage(
-        status === "finished"
-          ? "Status transaksi berhasil diubah menjadi Finished."
-          : "Status transaksi berhasil diperbarui."
-      );
-      await fetchTransactions();
-    } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : "Gagal update status transaksi.");
-    } finally {
-      setUpdatingAssignmentId(null);
-    }
-  };
-
-  const statusClass = (status?: string) => {
-    switch (status) {
-      case "Waiting":
-        return "bg-amber-100 text-amber-700";
-      case "Assigned":
-        return "bg-sky-100 text-sky-700";
-      case "Washing":
-        return "bg-indigo-100 text-indigo-700";
-      case "Finished":
-        return "bg-emerald-100 text-emerald-700";
-      case "Cancel":
-        return "bg-rose-100 text-rose-700";
-      default:
-        return "bg-slate-100 text-slate-700";
+      setSuccessMessage('Status transaksi diubah menjadi Finished.');
+    } catch (err) {
+      console.error(err);
+      setErrorMessage('Gagal mengubah status.');
     }
   };
 
@@ -307,17 +231,7 @@ export default function Kasir() {
               ))}
             </select>
           </div>
-          <div>
-            <label className="block text-sm font-medium">Jumlah</label>
-            <input
-              type="number"
-              min="1"
-              value={form.quantity}
-              onChange={(e) => handleChange("quantity", e.target.value)}
-              className="mt-2 block w-full rounded-md border px-3 py-2"
-              required
-            />
-          </div>
+        
           <div>
             <label className="block text-sm font-medium">Total</label>
             <input
@@ -339,6 +253,21 @@ export default function Kasir() {
               <option value="E-Wallet">E-Wallet</option>
             </select>
           </div>
+
+          <div>
+            <label className="block text-sm font-medium">Assign Karyawan (opsional)</label>
+            <select
+              value={(form as any).assign_user_id}
+              onChange={(e) => handleChange('assign_user_id', e.target.value)}
+              className="mt-2 block w-full rounded-md border px-3 py-2"
+            >
+              <option value="">Pilih karyawan</option>
+              {karyawans.map((k) => (
+                <option key={k.id} value={k.id}>{k.nama}</option>
+              ))}
+            </select>
+          </div>
+
           <div className="col-span-1 sm:col-span-2 xl:col-span-4">
             <label className="block text-sm font-medium">Catatan</label>
             <textarea
@@ -346,6 +275,16 @@ export default function Kasir() {
               onChange={(e) => handleChange("catatan", e.target.value)}
               className="mt-2 block w-full rounded-md border px-3 py-2"
               rows={3}
+            />
+          </div>
+            <div>
+            <input
+              type="number"
+              min="1"
+              value="1"
+              onChange={(e) => handleChange("quantity", e.target.value)}
+              className="hidden mt-2 block w-full rounded-md border px-3 py-2"
+              required
             />
           </div>
           <div className="col-span-1 sm:col-span-2 xl:col-span-4 flex justify-end">
@@ -364,7 +303,7 @@ export default function Kasir() {
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <h3 className="text-xl font-semibold">Transaksi Terakhir</h3>
-            <p className="text-sm text-slate-500">Assign karyawan dan update status transaksi.</p>
+            <p className="text-sm text-slate-500">Melihat transaksi terbaru dari sistem.</p>
           </div>
         </div>
 
@@ -374,7 +313,6 @@ export default function Kasir() {
               <tr>
                 <th className="px-4 py-3 font-semibold text-slate-700">No</th>
                 <th className="px-4 py-3 font-semibold text-slate-700">Tanggal</th>
-                <th className="px-4 py-3 font-semibold text-slate-700">Plat</th>
                 <th className="px-4 py-3 font-semibold text-slate-700">Total</th>
                 <th className="px-4 py-3 font-semibold text-slate-700">Status</th>
                 <th className="px-4 py-3 font-semibold text-slate-700">Karyawan</th>
@@ -384,101 +322,27 @@ export default function Kasir() {
             <tbody>
               {!transactions.length ? (
                 <tr>
-                  <td colSpan={7} className="px-4 py-6 text-center text-sm text-slate-500">
+                  <td colSpan={6} className="px-4 py-6 text-center text-sm text-slate-500">
                     Tidak ada transaksi.
                   </td>
                 </tr>
               ) : (
                 transactions.map((transaction, index) => {
-                  const assignment = getFirstAssignment(transaction);
-                  const assignedUserName = assignment?.User?.nama || "-";
-                  const canAssign = transaction.status === "Waiting" && !assignment;
-                  const canStart = Boolean(assignment?.id) && transaction.status === "Assigned";
-                  const canFinish = Boolean(assignment?.id) && transaction.status === "Washing";
-                  const canCancel = Boolean(assignment?.id) && transaction.status !== "Finished" && transaction.status !== "Cancel";
-
+                  const assignment = transaction.Assignments && transaction.Assignments.length ? transaction.Assignments[0] : null;
+                  const assigneeName = assignment?.User?.nama || assignment?.User?.username || '';
                   return (
-                    <tr key={transaction.id || index} className="border-t border-slate-200 align-top">
+                    <tr key={transaction.id || index} className="border-t border-slate-200">
                       <td className="px-4 py-3">{index + 1}</td>
                       <td className="px-4 py-3">
                         {new Date(transaction.tanggal || transaction.created_at || Date.now()).toLocaleDateString("id-ID")}
                       </td>
-                      <td className="px-4 py-3">{transaction.nomor_plat || "-"}</td>
                       <td className="px-4 py-3">Rp {Number(transaction.total || 0).toLocaleString("id-ID")}</td>
+                      <td className="px-4 py-3">{transaction.status || "-"}</td>
+                      <td className="px-4 py-3">{assigneeName || '-'}</td>
                       <td className="px-4 py-3">
-                        <span className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold ${statusClass(transaction.status)}`}>
-                          {transaction.status || "-"}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3">{assignedUserName}</td>
-                      <td className="px-4 py-3">
-                        <div className="flex min-w-[280px] flex-col gap-2">
-                          {canAssign && (
-                            <div className="flex gap-2">
-                              <select
-                                value={assignUserByTransaction[transaction.id] || ""}
-                                onChange={(e) =>
-                                  setAssignUserByTransaction((prev) => ({
-                                    ...prev,
-                                    [transaction.id]: e.target.value,
-                                  }))
-                                }
-                                className="w-full rounded-md border bg-white px-3 py-2"
-                              >
-                                <option value="">Pilih karyawan</option>
-                                {users.map((user) => (
-                                  <option key={user.id} value={user.id}>
-                                    {user.nama}
-                                  </option>
-                                ))}
-                              </select>
-                              <button
-                                type="button"
-                                onClick={() => handleAssignUser(transaction.id)}
-                                disabled={assigningId === transaction.id}
-                                className="rounded-lg bg-sky-600 px-3 py-2 text-xs font-semibold text-white hover:bg-sky-500 disabled:bg-slate-400"
-                              >
-                                {assigningId === transaction.id ? "Assign..." : "Assign"}
-                              </button>
-                            </div>
-                          )}
-
-                          <div className="flex flex-wrap gap-2">
-                            {canStart && (
-                              <button
-                                type="button"
-                                onClick={() => handleUpdateAssignmentStatus(assignment.id, "started")}
-                                disabled={updatingAssignmentId === assignment.id}
-                                className="rounded-lg bg-indigo-600 px-3 py-2 text-xs font-semibold text-white hover:bg-indigo-500 disabled:bg-slate-400"
-                              >
-                                Mulai
-                              </button>
-                            )}
-                            {canFinish && (
-                              <button
-                                type="button"
-                                onClick={() => handleUpdateAssignmentStatus(assignment.id, "finished")}
-                                disabled={updatingAssignmentId === assignment.id}
-                                className="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white hover:bg-emerald-500 disabled:bg-slate-400"
-                              >
-                                Finished
-                              </button>
-                            )}
-                            {canCancel && (
-                              <button
-                                type="button"
-                                onClick={() => handleUpdateAssignmentStatus(assignment.id, "cancel")}
-                                disabled={updatingAssignmentId === assignment.id}
-                                className="rounded-lg bg-rose-600 px-3 py-2 text-xs font-semibold text-white hover:bg-rose-500 disabled:bg-slate-400"
-                              >
-                                Cancel
-                              </button>
-                            )}
-                            {!canAssign && !canStart && !canFinish && !canCancel && (
-                              <span className="text-xs text-slate-500">Tidak ada aksi</span>
-                            )}
-                          </div>
-                        </div>
+                        {assignment && transaction.status !== 'Finished' ? (
+                          <button onClick={() => handleFinish(assignment.id)} className="rounded-md bg-emerald-600 px-3 py-1 text-white text-sm">Selesai</button>
+                        ) : null}
                       </td>
                     </tr>
                   );
